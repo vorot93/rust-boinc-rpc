@@ -1,0 +1,21 @@
+[package]
+name = "boinc-rpc"
+version = "0.1.0"
+authors = [
+    "Artem Vorotnikov <artem@vorotnikov.me>",
+]
+description = "Access BOINC clients via RPC"
+repository = "https://github.com/vorot93/boinc-rpc-rs"
+keywords = [
+    "boinc",
+    "rpc",
+    "api",
+]
+categories = [
+    "api-bindings",
+]
+license = "LGPL-3.0"
+
+[dependencies]
+treexml = "0.3"
+rust-crypto = "0.2"
