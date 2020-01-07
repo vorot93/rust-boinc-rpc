@@ -1,18 +1,16 @@
-extern crate std;
-extern crate treexml;
-
 use std::str::FromStr;
 
 use errors::Error;
 
 pub fn parse_node(s: &str) -> Result<treexml::Element, Error> {
-    let doc = try!(treexml::Document::parse(s.as_bytes()));
+    let doc = treexml::Document::parse(s.as_bytes())?;
 
-    Ok(try!(doc.root.ok_or(Error::NullError("Root is empty".into()))))
+    Ok(doc.root.ok_or(Error::NullError("Root is empty".into()))?)
 }
 
 pub fn eval_node_contents<T>(node: &treexml::Element) -> Option<T>
-    where T: FromStr
+where
+    T: FromStr,
 {
     match node.text {
         Some(ref v) => v.parse::<T>().ok(),

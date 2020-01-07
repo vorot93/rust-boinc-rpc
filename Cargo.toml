@@ -17,5 +17,5 @@ categories = [
 license = "LGPL-3.0"
 
 [dependencies]
-treexml = "0.3"
+treexml = "0.7"
 rust-crypto = "0.2"
