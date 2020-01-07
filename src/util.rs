@@ -5,7 +5,9 @@ use errors::Error;
 pub fn parse_node(s: &str) -> Result<treexml::Element, Error> {
     let doc = treexml::Document::parse(s.as_bytes())?;
 
-    Ok(doc.root.ok_or(Error::NullError("Root is empty".into()))?)
+    Ok(doc
+        .root
+        .ok_or_else(|| Error::NullError("Root is empty".into()))?)
 }
 
 pub fn eval_node_contents<T>(node: &treexml::Element) -> Option<T>
@@ -25,7 +27,7 @@ pub fn any_text(node: &treexml::Element) -> Option<String> {
     if node.text.is_some() {
         return node.text.clone();
     }
-    return None;
+    None
 }
 
 pub fn trimmed_optional(e: &Option<String>) -> Option<String> {

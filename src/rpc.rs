@@ -35,7 +35,7 @@ fn read_from_boinc_tcpstream(stream: &mut std::net::TcpStream) -> Result<String,
 
 fn send_to_boinc_tcpstream(stream: &mut std::net::TcpStream, msg: &str) -> Result<(), Error> {
     stream.write_all(msg.as_bytes())?;
-    stream.write_all(&vec![TERMCHAR])?;
+    stream.write_all(&[TERMCHAR])?;
 
     Ok(())
 }
@@ -90,12 +90,14 @@ impl SimpleDaemonStream {
                             ));
                         }
                         let mut nonce_node = treexml::Element::new("nonce_hash");
-                        let pwd = password
-                            .clone()
-                            .ok_or(Error::AuthError("Password required for nonce".to_string()))?;
+                        let pwd = password.clone().ok_or_else(|| {
+                            Error::AuthError("Password required for nonce".to_string())
+                        })?;
                         nonce_node.text = Some(compute_nonce_hash(
                             &pwd,
-                            &node.text.ok_or(Error::AuthError("Invalid nonce".into()))?,
+                            &node
+                                .text
+                                .ok_or_else(|| Error::AuthError("Invalid nonce".into()))?,
                         ));
 
                         let mut auth2_node = treexml::Element::new("auth2");
@@ -142,8 +144,8 @@ impl DaemonStream for SimpleDaemonStream {
 
         let recv_data = read_from_boinc_tcpstream(&mut self.conn)?
             .replace("<?xml version=\"1.0\" encoding=\"ISO-8859-1\" ?>", "");
-        let mut rsp_root = util::parse_node(&recv_data)?;
-        verify_rpc_reply_root(&mut rsp_root)?;
+        let rsp_root = util::parse_node(&recv_data)?;
+        verify_rpc_reply_root(&rsp_root)?;
 
         Ok(rsp_root)
     }

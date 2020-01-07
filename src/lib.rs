@@ -23,7 +23,7 @@ pub fn verify_rpc_reply_contents(root_node: &treexml::Element) -> Result<bool, E
                 let error_msg = node
                     .text
                     .clone()
-                    .ok_or(Error::DaemonError("Unknown error".into()))?;
+                    .ok_or_else(|| Error::DaemonError("Unknown error".into()))?;
 
                 return match &*error_msg {
                     "unauthorized" => Err(Error::AuthError(error_msg)),
@@ -97,11 +97,8 @@ impl<'a> From<&'a treexml::Element> for models::ProjectInfo {
                     let mut platforms = Vec::new();
                     for platform_node in &n.children {
                         if platform_node.name == "platform" {
-                            match platform_node.text {
-                                Some(ref v) => {
-                                    platforms.push(v.clone());
-                                }
-                                _ => {}
+                            if let Some(v) = &platform_node.text {
+                                platforms.push(v.clone());
                             }
                         }
                     }
@@ -259,7 +256,7 @@ fn get_object<T: for<'a> From<&'a treexml::Element>>(
             return Ok(T::from(child));
         }
     }
-    return Err(Error::DataParseError("Object not found.".to_string()));
+    Err(Error::DataParseError("Object not found.".to_string()))
 }
 
 fn get_object_by_req_tag<T: for<'a> From<&'a treexml::Element>>(
@@ -340,23 +337,15 @@ fn get_account_manager_rpc_status(conn: &mut dyn DaemonStream) -> Result<i32, Er
     let root_node = conn.query(vec![treexml::Element::new("acct_mgr_rpc_poll")])?;
     verify_rpc_reply_contents(&root_node)?;
     for child in &root_node.children {
-        match &*child.name {
-            "acct_mgr_rpc_reply" => {
-                for c in &child.children {
-                    match &*c.name {
-                        "error_num" => {
-                            v = util::eval_node_contents(&c);
-                        }
-                        _ => {}
-                    }
+        if &*child.name == "acct_mgr_rpc_reply" {
+            for c in &child.children {
+                if &*c.name == "error_num" {
+                    v = util::eval_node_contents(&c);
                 }
             }
-            _ => {}
         }
     }
-    v.ok_or(Error::DataParseError(
-        "acct_mgr_rpc_reply node not found".into(),
-    ))
+    v.ok_or_else(|| Error::DataParseError("acct_mgr_rpc_reply node not found".into()))
 }
 
 fn connect_to_account_manager(
@@ -551,7 +540,7 @@ impl SimpleClient {
             }
         }
 
-        return Err(Error::NetworkError(last_err));
+        Err(Error::NetworkError(last_err))
     }
 }
 
