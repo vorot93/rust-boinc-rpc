@@ -153,9 +153,9 @@ impl<'a> From<&'a treexml::Element> for models::VersionInfo {
     }
 }
 
-impl<'a> From<&'a treexml::Element> for models::Result {
-    fn from(node: &treexml::Element) -> models::Result {
-        let mut e = models::Result::default();
+impl<'a> From<&'a treexml::Element> for models::TaskResult {
+    fn from(node: &treexml::Element) -> models::TaskResult {
+        let mut e = models::TaskResult::default();
         for n in &node.children {
             match &*n.name {
                 "name" => {
@@ -402,7 +402,7 @@ fn exchange_versions(
 fn get_results(
     conn: &mut dyn DaemonStream,
     active_only: bool,
-) -> Result<Vec<models::Result>, Error> {
+) -> Result<Vec<models::TaskResult>, Error> {
     get_vec(
         conn,
         vec![{
@@ -473,7 +473,7 @@ pub trait Client {
     fn get_account_manager_rpc_status(&mut self) -> Result<i32, Error>;
     fn connect_to_account_manager(&mut self, &str, &str, &str) -> Result<bool, Error>;
     fn exchange_versions(&mut self, &models::VersionInfo) -> Result<models::VersionInfo, Error>;
-    fn get_results(&mut self, bool) -> Result<Vec<models::Result>, Error>;
+    fn get_results(&mut self, bool) -> Result<Vec<models::TaskResult>, Error>;
     fn set_mode(&mut self, models::Component, models::RunMode, f64) -> Result<(), Error>;
     fn get_host_info(&mut self) -> Result<models::HostInfo, Error>;
     fn set_language(&mut self, &str) -> Result<(), Error>;
@@ -571,7 +571,7 @@ impl Client for SimpleClient {
     ) -> Result<models::VersionInfo, Error> {
         self.failover_exec(&mut |conn| exchange_versions(conn, info))
     }
-    fn get_results(&mut self, active_only: bool) -> Result<Vec<models::Result>, Error> {
+    fn get_results(&mut self, active_only: bool) -> Result<Vec<models::TaskResult>, Error> {
         self.failover_exec(&mut |conn| get_results(conn, active_only))
     }
     fn set_mode(

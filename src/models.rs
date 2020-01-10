@@ -117,7 +117,7 @@ pub struct Message {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Result {
+pub struct TaskResult {
     pub name: Option<String>,
     pub wu_name: Option<String>,
     pub platform: Option<String>,
