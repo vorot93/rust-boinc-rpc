@@ -1,4 +1,4 @@
-extern crate std;
+use super::util;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Component {
@@ -132,4 +132,85 @@ pub struct TaskResult {
     pub received_time: Option<f64>,
     pub estimated_cpu_time_remaining: Option<f64>,
     pub completed_time: Option<f64>,
+    pub active_task: Option<ActiveTask>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ActiveTask {
+    pub active_task_state: Option<String>,
+    pub app_version_num: Option<String>,
+    pub slot: Option<u64>,
+    pub pid: Option<u64>,
+    pub scheduler_state: Option<String>,
+    pub checkpoint_cpu_time: Option<f64>,
+    pub fraction_done: Option<f64>,
+    pub current_cpu_time: Option<f64>,
+    pub elapsed_time: Option<f64>,
+    pub swap_size: Option<f64>,
+    pub working_set_size: Option<f64>,
+    pub working_set_size_smoothed: Option<f64>,
+    pub page_fault_rate: Option<f64>,
+    pub bytes_sent: Option<f64>,
+    pub bytes_received: Option<f64>,
+    pub progress_rate: Option<f64>,
+}
+
+impl<'a> From<&'a treexml::Element> for ActiveTask {
+    fn from(node: &treexml::Element) -> Self {
+        let mut e = ActiveTask::default();
+        for n in &node.children {
+            match &*n.name {
+                "active_task_state" => {
+                    e.active_task_state = util::trimmed_optional(&n.text);
+                }
+                "app_version_num" => {
+                    e.app_version_num = util::trimmed_optional(&n.text);
+                }
+                "slot" => {
+                    e.slot = util::eval_node_contents(&n);
+                }
+                "pid" => {
+                    e.pid = util::eval_node_contents(&n);
+                }
+                "scheduler_state" => {
+                    e.scheduler_state = util::trimmed_optional(&n.text);
+                }
+                "checkpoint_cpu_time" => {
+                    e.checkpoint_cpu_time = util::eval_node_contents(&n);
+                }
+                "fraction_done" => {
+                    e.fraction_done = util::eval_node_contents(&n);
+                }
+                "current_cpu_time" => {
+                    e.current_cpu_time = util::eval_node_contents(&n);
+                }
+                "elapsed_time" => {
+                    e.elapsed_time = util::eval_node_contents(&n);
+                }
+                "swap_size" => {
+                    e.swap_size = util::eval_node_contents(&n);
+                }
+                "working_set_size" => {
+                    e.working_set_size = util::eval_node_contents(&n);
+                }
+                "working_set_size_smoothed" => {
+                    e.working_set_size_smoothed = util::eval_node_contents(&n);
+                }
+                "page_fault_rate" => {
+                    e.page_fault_rate = util::eval_node_contents(&n);
+                }
+                "bytes_sent" => {
+                    e.bytes_sent = util::eval_node_contents(&n);
+                }
+                "bytes_received" => {
+                    e.bytes_received = util::eval_node_contents(&n);
+                }
+                "progress_rate" => {
+                    e.progress_rate = util::eval_node_contents(&n);
+                }
+                _ => {}
+            }
+        }
+        e
+    }
 }

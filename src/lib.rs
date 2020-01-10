@@ -200,6 +200,9 @@ impl<'a> From<&'a treexml::Element> for models::TaskResult {
                 "completed_time" => {
                     e.completed_time = util::eval_node_contents(&n);
                 }
+                "active_task" => {
+                    e.active_task = Some(models::ActiveTask::from(n));
+                }
                 _ => {}
             }
         }
