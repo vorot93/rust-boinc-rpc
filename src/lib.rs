@@ -247,351 +247,246 @@ impl<'a> From<&'a treexml::Element> for models::HostInfo {
     }
 }
 
-fn get_object<T: for<'a> From<&'a treexml::Element>>(
-    conn: &mut dyn DaemonStream,
-    req_data: Vec<treexml::Element>,
-    object_tag: &str,
-) -> Result<T, Error> {
-    let root_node = conn.query(req_data)?;
-    verify_rpc_reply_contents(&root_node)?;
-    for child in &root_node.children {
-        if child.name == object_tag {
-            return Ok(T::from(child));
-        }
+pub struct Client {
+    conn: DaemonStream,
+}
+
+impl Client {
+    pub async fn connect(addr: String, password: Option<&str>) -> Result<Self, Error> {
+        Ok(Self {
+            conn: DaemonStream::connect(addr, password).await?,
+        })
     }
-    Err(Error::DataParseError("Object not found.".to_string()))
-}
 
-fn get_object_by_req_tag<T: for<'a> From<&'a treexml::Element>>(
-    conn: &mut dyn DaemonStream,
-    req_tag: &str,
-    object_tag: &str,
-) -> Result<T, Error> {
-    get_object(conn, vec![treexml::Element::new(req_tag)], object_tag)
-}
-
-fn get_vec<T: for<'a> From<&'a treexml::Element>>(
-    conn: &mut dyn DaemonStream,
-    req_data: Vec<treexml::Element>,
-    vec_tag: &str,
-    object_tag: &str,
-) -> Result<Vec<T>, Error> {
-    let mut v = Vec::new();
-    {
-        let root_node = conn.query(req_data)?;
-        verify_rpc_reply_contents(&root_node)?;
-        let mut success = false;
-        for child in &root_node.children {
-            if child.name == vec_tag {
-                success = true;
-                for vec_child in &child.children {
-                    if vec_child.name == object_tag {
-                        v.push(T::from(vec_child));
-                    }
-                }
-            }
-        }
-        if !success {
-            return Err(Error::DataParseError("Objects not found.".to_string()));
-        }
-    }
-    Ok(v)
-}
-
-fn get_vec_by_req_tag<T: for<'a> From<&'a treexml::Element>>(
-    conn: &mut dyn DaemonStream,
-    req_tag: &str,
-    vec_tag: &str,
-    object_tag: &str,
-) -> Result<Vec<T>, Error> {
-    get_vec(
-        conn,
-        vec![treexml::Element::new(req_tag)],
-        vec_tag,
-        object_tag,
-    )
-}
-
-fn get_messages(conn: &mut dyn DaemonStream, seqno: i64) -> Result<Vec<models::Message>, Error> {
-    get_vec(
-        conn,
-        vec![{
-            let mut node = treexml::Element::new("get_messages");
-            node.text = Some(format!("{}", seqno));
-            node
-        }],
-        "msgs",
-        "msg",
-    )
-}
-
-fn get_projects(conn: &mut dyn DaemonStream) -> Result<Vec<models::ProjectInfo>, Error> {
-    get_vec_by_req_tag(conn, "get_all_projects_list", "projects", "project")
-}
-
-fn get_account_manager_info(
-    conn: &mut dyn DaemonStream,
-) -> Result<models::AccountManagerInfo, Error> {
-    get_object_by_req_tag(conn, "acct_mgr_info", "acct_mgr_info")
-}
-
-fn get_account_manager_rpc_status(conn: &mut dyn DaemonStream) -> Result<i32, Error> {
-    let mut v: Option<i32> = None;
-    let root_node = conn.query(vec![treexml::Element::new("acct_mgr_rpc_poll")])?;
-    verify_rpc_reply_contents(&root_node)?;
-    for child in &root_node.children {
-        if &*child.name == "acct_mgr_rpc_reply" {
-            for c in &child.children {
-                if &*c.name == "error_num" {
-                    v = util::eval_node_contents(&c);
-                }
-            }
-        }
-    }
-    v.ok_or_else(|| Error::DataParseError("acct_mgr_rpc_reply node not found".into()))
-}
-
-fn connect_to_account_manager(
-    conn: &mut dyn DaemonStream,
-    url: &str,
-    name: &str,
-    password: &str,
-) -> Result<bool, Error> {
-    let mut req_node = treexml::Element::new("acct_mgr_rpc");
-    req_node.children = vec![
-        {
-            let mut node = treexml::Element::new("url");
-            node.text = Some(url.into());
-            node
-        },
-        {
-            let mut node = treexml::Element::new("name");
-            node.text = Some(name.into());
-            node
-        },
-        {
-            let mut node = treexml::Element::new("password");
-            node.text = Some(password.into());
-            node
-        },
-    ];
-    let root_node = conn.query(vec![req_node])?;
-    Ok(verify_rpc_reply_contents(&root_node)?)
-}
-
-fn exchange_versions(
-    conn: &mut dyn DaemonStream,
-    info: &models::VersionInfo,
-) -> Result<models::VersionInfo, Error> {
-    let mut content_node = treexml::Element::new("exchange_versions");
-    {
-        let mut node = treexml::Element::new("major");
-        node.text = info.minor.map(|v| format!("{}", v));
-        content_node.children.push(node);
-    }
-    {
-        let mut node = treexml::Element::new("minor");
-        node.text = info.major.map(|v| format!("{}", v));
-        content_node.children.push(node);
-    }
-    {
-        let mut node = treexml::Element::new("release");
-        node.text = info.release.map(|v| format!("{}", v));
-        content_node.children.push(node);
-    }
-    get_object(conn, vec![content_node], "server_version")
-}
-
-fn get_results(
-    conn: &mut dyn DaemonStream,
-    active_only: bool,
-) -> Result<Vec<models::TaskResult>, Error> {
-    get_vec(
-        conn,
-        vec![{
-            let mut node = treexml::Element::new("get_results");
-            if active_only {
-                let mut ao_node = treexml::Element::new("active_only");
-                ao_node.text = Some("1".into());
-                node.children.push(ao_node);
-            }
-            node
-        }],
-        "results",
-        "result",
-    )
-}
-
-fn set_mode(
-    conn: &mut dyn DaemonStream,
-    c: models::Component,
-    m: models::RunMode,
-    duration: f64,
-) -> Result<(), Error> {
-    let rsp_root = conn.query(vec![{
-        let comp_desc = match c {
-            models::Component::CPU => "run",
-            models::Component::GPU => "gpu",
-            models::Component::Network => "network",
-        }
-        .to_string();
-        let mode_desc = match m {
-            models::RunMode::Always => "always",
-            models::RunMode::Auto => "auto",
-            models::RunMode::Never => "never",
-            models::RunMode::Restore => "restore",
-        }
-        .to_string();
-
-        let mut node = treexml::Element::new(format!("set_{}_mode", &comp_desc));
-        let mut dur_node = treexml::Element::new("duration");
-        dur_node.text = Some(format!("{}", duration));
-        node.children.push(dur_node);
-        node.children.push(treexml::Element::new(mode_desc));
-        node
-    }])?;
-    verify_rpc_reply_contents(&rsp_root)?;
-    Ok(())
-}
-
-fn get_host_info(conn: &mut dyn DaemonStream) -> Result<models::HostInfo, Error> {
-    get_object_by_req_tag(conn, "get_host_info", "host_info")
-}
-
-fn set_language(conn: &mut dyn DaemonStream, v: &str) -> Result<(), Error> {
-    verify_rpc_reply_contents(&conn.query(vec![{
-        let mut node = treexml::Element::new("set_language");
-        let mut language_node = treexml::Element::new("language");
-        language_node.text = Some(v.into());
-        node.children.push(language_node);
-        node
-    }])?)?;
-    Ok(())
-}
-
-pub trait Client {
-    fn get_messages(&mut self, i64) -> Result<Vec<models::Message>, Error>;
-    fn get_projects(&mut self) -> Result<Vec<models::ProjectInfo>, Error>;
-    fn get_account_manager_info(&mut self) -> Result<models::AccountManagerInfo, Error>;
-    fn get_account_manager_rpc_status(&mut self) -> Result<i32, Error>;
-    fn connect_to_account_manager(&mut self, &str, &str, &str) -> Result<bool, Error>;
-    fn exchange_versions(&mut self, &models::VersionInfo) -> Result<models::VersionInfo, Error>;
-    fn get_results(&mut self, bool) -> Result<Vec<models::TaskResult>, Error>;
-    fn set_mode(&mut self, models::Component, models::RunMode, f64) -> Result<(), Error>;
-    fn get_host_info(&mut self) -> Result<models::HostInfo, Error>;
-    fn set_language(&mut self, &str) -> Result<(), Error>;
-}
-
-pub struct SimpleClient {
-    stream: Option<SimpleDaemonStream>,
-    pub max_retries: i32,
-    pub addr: std::net::SocketAddr,
-    pub password: Option<String>,
-}
-
-impl Default for SimpleClient {
-    fn default() -> SimpleClient {
-        SimpleClient {
-            addr: std::net::SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-                31416,
-            ),
-            password: None,
-            max_retries: 0,
-            stream: None,
-        }
-    }
-}
-
-impl SimpleClient {
-    fn failover_exec<T>(
+    async fn get_object<T: for<'a> From<&'a treexml::Element>>(
         &mut self,
-        f: &mut dyn FnMut(&mut dyn DaemonStream) -> Result<T, Error>,
+        req_data: Vec<treexml::Element>,
+        object_tag: &str,
     ) -> Result<T, Error> {
-        let mut last_err = String::new();
-        for _ in -1..self.max_retries {
-            if self.stream.is_none() {
-                match SimpleDaemonStream::connect(&self.addr, &self.password) {
-                    Ok(v) => {
-                        self.stream = Some(v);
-                    }
-                    Err(v) => match v {
-                        Error::NetworkError(desc) => {
-                            last_err = desc;
-                            continue;
-                        }
-                        _ => {
-                            return Err(v);
-                        }
-                    },
-                }
-            }
-            let res = f(self.stream.as_mut().unwrap());
-            match res {
-                Ok(v) => {
-                    return Ok(v);
-                }
-                Err(err) => match err {
-                    Error::NetworkError(desc) => {
-                        last_err = desc;
-                        self.stream = None;
-                    }
-                    _ => {
-                        return Err(err);
-                    }
-                },
+        let root_node = self.conn.query(req_data).await?;
+        verify_rpc_reply_contents(&root_node)?;
+        for child in &root_node.children {
+            if child.name == object_tag {
+                return Ok(T::from(child));
             }
         }
+        Err(Error::DataParseError("Object not found.".to_string()))
+    }
 
-        Err(Error::NetworkError(last_err))
+    async fn get_object_by_req_tag<T: for<'a> From<&'a treexml::Element>>(
+        &mut self,
+        req_tag: &str,
+        object_tag: &str,
+    ) -> Result<T, Error> {
+        self.get_object(vec![treexml::Element::new(req_tag)], object_tag)
+            .await
     }
-}
 
-impl Client for SimpleClient {
-    fn get_messages(&mut self, seqno: i64) -> Result<Vec<models::Message>, Error> {
-        self.failover_exec(&mut |conn| get_messages(conn, seqno))
+    async fn get_vec<T: for<'a> From<&'a treexml::Element>>(
+        &mut self,
+        req_data: Vec<treexml::Element>,
+        vec_tag: &str,
+        object_tag: &str,
+    ) -> Result<Vec<T>, Error> {
+        let mut v = Vec::new();
+        {
+            let root_node = self.conn.query(req_data).await?;
+            verify_rpc_reply_contents(&root_node)?;
+            let mut success = false;
+            for child in &root_node.children {
+                if child.name == vec_tag {
+                    success = true;
+                    for vec_child in &child.children {
+                        if vec_child.name == object_tag {
+                            v.push(T::from(vec_child));
+                        }
+                    }
+                }
+            }
+            if !success {
+                return Err(Error::DataParseError("Objects not found.".to_string()));
+            }
+        }
+        Ok(v)
     }
-    fn get_projects(&mut self) -> Result<Vec<models::ProjectInfo>, Error> {
-        self.failover_exec(&mut |conn| get_projects(conn))
+
+    async fn get_vec_by_req_tag<T: for<'a> From<&'a treexml::Element>>(
+        &mut self,
+        req_tag: &str,
+        vec_tag: &str,
+        object_tag: &str,
+    ) -> Result<Vec<T>, Error> {
+        self.get_vec(vec![treexml::Element::new(req_tag)], vec_tag, object_tag)
+            .await
     }
-    fn get_account_manager_info(&mut self) -> Result<models::AccountManagerInfo, Error> {
-        self.failover_exec(&mut |conn| get_account_manager_info(conn))
+
+    pub async fn get_messages(&mut self, seqno: i64) -> Result<Vec<models::Message>, Error> {
+        self.get_vec(
+            vec![{
+                let mut node = treexml::Element::new("get_messages");
+                node.text = Some(format!("{}", seqno));
+                node
+            }],
+            "msgs",
+            "msg",
+        )
+        .await
     }
-    fn get_account_manager_rpc_status(&mut self) -> Result<i32, Error> {
-        self.failover_exec(&mut |conn| get_account_manager_rpc_status(conn))
+
+    pub async fn get_projects(&mut self) -> Result<Vec<models::ProjectInfo>, Error> {
+        self.get_vec_by_req_tag("get_all_projects_list", "projects", "project")
+            .await
     }
-    fn connect_to_account_manager(
+
+    pub async fn get_account_manager_info(&mut self) -> Result<models::AccountManagerInfo, Error> {
+        self.get_object_by_req_tag("acct_mgr_info", "acct_mgr_info")
+            .await
+    }
+
+    pub async fn get_account_manager_rpc_status(&mut self) -> Result<i32, Error> {
+        let mut v: Option<i32> = None;
+        let root_node = self
+            .conn
+            .query(vec![treexml::Element::new("acct_mgr_rpc_poll")])
+            .await?;
+        verify_rpc_reply_contents(&root_node)?;
+        for child in &root_node.children {
+            if &*child.name == "acct_mgr_rpc_reply" {
+                for c in &child.children {
+                    if &*c.name == "error_num" {
+                        v = util::eval_node_contents(&c);
+                    }
+                }
+            }
+        }
+        v.ok_or_else(|| Error::DataParseError("acct_mgr_rpc_reply node not found".into()))
+    }
+
+    pub async fn connect_to_account_manager(
         &mut self,
         url: &str,
         name: &str,
         password: &str,
     ) -> Result<bool, Error> {
-        self.failover_exec(&mut |conn| connect_to_account_manager(conn, url, name, password))
+        let mut req_node = treexml::Element::new("acct_mgr_rpc");
+        req_node.children = vec![
+            {
+                let mut node = treexml::Element::new("url");
+                node.text = Some(url.into());
+                node
+            },
+            {
+                let mut node = treexml::Element::new("name");
+                node.text = Some(name.into());
+                node
+            },
+            {
+                let mut node = treexml::Element::new("password");
+                node.text = Some(password.into());
+                node
+            },
+        ];
+        let root_node = self.conn.query(vec![req_node]).await?;
+        Ok(verify_rpc_reply_contents(&root_node)?)
     }
-    fn exchange_versions(
+
+    pub async fn exchange_versions(
         &mut self,
         info: &models::VersionInfo,
     ) -> Result<models::VersionInfo, Error> {
-        self.failover_exec(&mut |conn| exchange_versions(conn, info))
+        let mut content_node = treexml::Element::new("exchange_versions");
+        {
+            let mut node = treexml::Element::new("major");
+            node.text = info.minor.map(|v| format!("{}", v));
+            content_node.children.push(node);
+        }
+        {
+            let mut node = treexml::Element::new("minor");
+            node.text = info.major.map(|v| format!("{}", v));
+            content_node.children.push(node);
+        }
+        {
+            let mut node = treexml::Element::new("release");
+            node.text = info.release.map(|v| format!("{}", v));
+            content_node.children.push(node);
+        }
+        self.get_object(vec![content_node], "server_version").await
     }
-    fn get_results(&mut self, active_only: bool) -> Result<Vec<models::TaskResult>, Error> {
-        self.failover_exec(&mut |conn| get_results(conn, active_only))
+
+    pub async fn get_results(
+        &mut self,
+        active_only: bool,
+    ) -> Result<Vec<models::TaskResult>, Error> {
+        self.get_vec(
+            vec![{
+                let mut node = treexml::Element::new("get_results");
+                if active_only {
+                    let mut ao_node = treexml::Element::new("active_only");
+                    ao_node.text = Some("1".into());
+                    node.children.push(ao_node);
+                }
+                node
+            }],
+            "results",
+            "result",
+        )
+        .await
     }
-    fn set_mode(
+
+    pub async fn set_mode(
         &mut self,
         c: models::Component,
         m: models::RunMode,
         duration: f64,
     ) -> Result<(), Error> {
-        self.failover_exec(&mut |conn| set_mode(conn, c, m, duration))
+        let rsp_root = self
+            .conn
+            .query(vec![{
+                let comp_desc = match c {
+                    models::Component::CPU => "run",
+                    models::Component::GPU => "gpu",
+                    models::Component::Network => "network",
+                }
+                .to_string();
+                let mode_desc = match m {
+                    models::RunMode::Always => "always",
+                    models::RunMode::Auto => "auto",
+                    models::RunMode::Never => "never",
+                    models::RunMode::Restore => "restore",
+                }
+                .to_string();
+
+                let mut node = treexml::Element::new(format!("set_{}_mode", &comp_desc));
+                let mut dur_node = treexml::Element::new("duration");
+                dur_node.text = Some(format!("{}", duration));
+                node.children.push(dur_node);
+                node.children.push(treexml::Element::new(mode_desc));
+                node
+            }])
+            .await?;
+        verify_rpc_reply_contents(&rsp_root)?;
+        Ok(())
     }
 
-    fn get_host_info(&mut self) -> Result<models::HostInfo, Error> {
-        self.failover_exec(&mut |conn| get_host_info(conn))
+    pub async fn get_host_info(&mut self) -> Result<models::HostInfo, Error> {
+        self.get_object_by_req_tag("get_host_info", "host_info")
+            .await
     }
 
-    fn set_language(&mut self, v: &str) -> Result<(), Error> {
-        self.failover_exec(&mut |conn| set_language(conn, v))
+    pub async fn set_language(&mut self, v: &str) -> Result<(), Error> {
+        verify_rpc_reply_contents(
+            &self
+                .conn
+                .query(vec![{
+                    let mut node = treexml::Element::new("set_language");
+                    let mut language_node = treexml::Element::new("language");
+                    language_node.text = Some(v.into());
+                    node.children.push(language_node);
+                    node
+                }])
+                .await?,
+        )?;
+        Ok(())
     }
 }
 

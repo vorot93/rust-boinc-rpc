@@ -1,6 +1,3 @@
-extern crate std;
-extern crate treexml;
-
 #[derive(PartialEq, Debug)]
 pub enum Error {
     ConnectError(String),

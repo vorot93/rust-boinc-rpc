@@ -5,6 +5,7 @@ authors = [
     "Artem Vorotnikov <artem@vorotnikov.me>",
 ]
 description = "Access BOINC clients via RPC"
+edition = "2018"
 repository = "https://github.com/vorot93/boinc-rpc-rs"
 keywords = [
     "boinc",
@@ -14,8 +15,9 @@ keywords = [
 categories = [
     "api-bindings",
 ]
-license = "LGPL-3.0"
+license = "MIT"
 
 [dependencies]
+tokio = { version = "0.2", features = ["dns", "io-util", "tcp"] }
 treexml = "0.7"
 rust-crypto = "0.2"

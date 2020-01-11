@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use errors::Error;
+use crate::errors::Error;
 
 pub fn parse_node(s: &str) -> Result<treexml::Element, Error> {
     let doc = treexml::Document::parse(s.as_bytes())?;

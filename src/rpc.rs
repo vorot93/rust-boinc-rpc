@@ -1,11 +1,12 @@
 extern crate crypto;
 
-use rpc::crypto::digest::Digest;
-use std::io::Read;
-use std::io::Write;
+use crypto::digest::Digest;
+use tokio::io::{AsyncBufReadExt, BufReader, BufStream};
+use tokio::net::TcpStream;
+use tokio::prelude::*;
 
-use errors::Error;
-use util;
+use crate::errors::Error;
+use crate::util;
 
 pub fn compute_nonce_hash(pass: &str, nonce: &str) -> String {
     let mut digest = crypto::md5::Md5::new();
@@ -14,31 +15,6 @@ pub fn compute_nonce_hash(pass: &str, nonce: &str) -> String {
 }
 
 const TERMCHAR: u8 = 3;
-
-pub trait DaemonStream {
-    fn query(&mut self, Vec<treexml::Element>) -> Result<treexml::Element, Error>;
-}
-
-fn read_from_boinc_tcpstream(stream: &mut std::net::TcpStream) -> Result<String, Error> {
-    let mut recv_buf = Vec::new();
-    for byte in stream.try_clone()?.bytes() {
-        let data: u8 = byte?;
-        if data == TERMCHAR {
-            break;
-        } else {
-            recv_buf.push(data);
-        }
-    }
-    let s = String::from_utf8(recv_buf)?;
-    Ok(s)
-}
-
-fn send_to_boinc_tcpstream(stream: &mut std::net::TcpStream, msg: &str) -> Result<(), Error> {
-    stream.write_all(msg.as_bytes())?;
-    stream.write_all(&[TERMCHAR])?;
-
-    Ok(())
-}
 
 fn verify_rpc_reply_root(root_node: &treexml::Element) -> Result<(), Error> {
     if root_node.name != "boinc_gui_rpc_reply" {
@@ -52,16 +28,39 @@ fn verify_rpc_reply_root(root_node: &treexml::Element) -> Result<(), Error> {
     Ok(())
 }
 
-pub struct SimpleDaemonStream {
-    conn: std::net::TcpStream,
+async fn read_from_boinc_tcpstream(
+    conn: &mut BufStream<BufReader<TcpStream>>,
+) -> Result<String, Error> {
+    let mut recv_buf = Vec::new();
+    conn.read_until(TERMCHAR, &mut recv_buf).await?;
+    if recv_buf.pop().unwrap_or_default() != TERMCHAR {
+        return Err(Error::NetworkError(
+            "Unexpected EOF while reading from stream".into(),
+        ));
+    }
+
+    let s = String::from_utf8(recv_buf)?;
+    Ok(s)
 }
 
-impl SimpleDaemonStream {
-    pub fn connect(
-        host: &std::net::SocketAddr,
-        password: &Option<String>,
-    ) -> Result<SimpleDaemonStream, Error> {
-        let mut stream = std::net::TcpStream::connect(host)?;
+async fn send_to_boinc_tcpstream(
+    conn: &mut BufStream<BufReader<TcpStream>>,
+    msg: &str,
+) -> Result<(), Error> {
+    conn.write_all(msg.as_bytes()).await?;
+    conn.write_all(&[TERMCHAR]).await?;
+    conn.flush().await?;
+
+    Ok(())
+}
+
+pub struct DaemonStream {
+    conn: BufStream<BufReader<TcpStream>>,
+}
+
+impl DaemonStream {
+    pub async fn connect(host: String, password: Option<&str>) -> Result<Self, Error> {
+        let mut conn = BufStream::new(BufReader::new(TcpStream::connect(host).await?));
 
         let mut req_root = treexml::Element::new("auth1");
 
@@ -73,9 +72,9 @@ impl SimpleDaemonStream {
 
             req_root = treexml::Element::new("boinc_gui_rpc_request");
 
-            send_to_boinc_tcpstream(&mut stream, &s)?;
+            send_to_boinc_tcpstream(&mut conn, &s).await?;
 
-            let recv_data = read_from_boinc_tcpstream(&mut stream)?;
+            let recv_data = read_from_boinc_tcpstream(&mut conn).await?;
 
             let root_node = util::parse_node(&recv_data)?;
 
@@ -117,7 +116,7 @@ impl SimpleDaemonStream {
                         )));
                     }
                     "authorized" => {
-                        return Ok(SimpleDaemonStream { conn: stream });
+                        return Ok(Self { conn });
                     }
                     _ => {
                         return Err(Error::DaemonError(format!(
@@ -129,10 +128,11 @@ impl SimpleDaemonStream {
             }
         }
     }
-}
 
-impl DaemonStream for SimpleDaemonStream {
-    fn query(&mut self, request_data: Vec<treexml::Element>) -> Result<treexml::Element, Error> {
+    pub(crate) async fn query(
+        &mut self,
+        request_data: Vec<treexml::Element>,
+    ) -> Result<treexml::Element, Error> {
         if request_data.is_empty() {
             return Err(Error::NullError("Request data cannot be empty".into()));
         }
@@ -140,9 +140,10 @@ impl DaemonStream for SimpleDaemonStream {
         req_root.children = request_data;
 
         let s = format!("{}", &req_root);
-        send_to_boinc_tcpstream(&mut self.conn, &s.replace("<?xml version='1.0'?>", ""))?;
+        send_to_boinc_tcpstream(&mut self.conn, &s.replace("<?xml version='1.0'?>", "")).await?;
 
-        let recv_data = read_from_boinc_tcpstream(&mut self.conn)?
+        let recv_data = read_from_boinc_tcpstream(&mut self.conn)
+            .await?
             .replace("<?xml version=\"1.0\" encoding=\"ISO-8859-1\" ?>", "");
         let rsp_root = util::parse_node(&recv_data)?;
         verify_rpc_reply_root(&rsp_root)?;
