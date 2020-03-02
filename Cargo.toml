@@ -6,7 +6,7 @@ authors = [
 ]
 description = "Access BOINC clients via RPC"
 edition = "2018"
-repository = "https://github.com/vorot93/boinc-rpc-rs"
+repository = "https://github.com/vorot93/rust-boinc-rpc"
 keywords = [
     "boinc",
     "rpc",
@@ -15,7 +15,7 @@ keywords = [
 categories = [
     "api-bindings",
 ]
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 tokio = { version = "0.2", features = ["dns", "io-util", "tcp"] }
