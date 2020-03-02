@@ -1,12 +1,12 @@
 extern crate crypto;
 
 use crypto::digest::Digest;
-use tokio::io::{AsyncBufReadExt, BufReader, BufStream};
-use tokio::net::TcpStream;
-use tokio::prelude::*;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufStream},
+    net::TcpStream,
+};
 
-use crate::errors::Error;
-use crate::util;
+use crate::{errors::Error, util};
 
 pub fn compute_nonce_hash(pass: &str, nonce: &str) -> String {
     let mut digest = crypto::md5::Md5::new();
@@ -59,7 +59,7 @@ pub struct DaemonStream {
 }
 
 impl DaemonStream {
-    pub async fn connect(host: String, password: Option<&str>) -> Result<Self, Error> {
+    pub async fn connect(host: String, password: Option<String>) -> Result<Self, Error> {
         let mut conn = BufStream::new(BufReader::new(TcpStream::connect(host).await?));
 
         let mut req_root = treexml::Element::new("auth1");
@@ -83,9 +83,7 @@ impl DaemonStream {
                     "nonce" => {
                         if nonce_sent {
                             return Err(Error::DaemonError(
-                                "Daemon requested nonce again - could \
-                                 be a bug"
-                                    .into(),
+                                "Daemon requested nonce again - could be a bug".into(),
                             ));
                         }
                         let mut nonce_node = treexml::Element::new("nonce_hash");
@@ -110,8 +108,7 @@ impl DaemonStream {
                     }
                     "error" => {
                         return Err(Error::DaemonError(format!(
-                            "BOINC daemon returned error: \
-                             {:?}",
+                            "BOINC daemon returned error: {:?}",
                             node.text
                         )));
                     }

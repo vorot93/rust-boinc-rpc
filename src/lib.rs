@@ -1,10 +1,37 @@
+//! Rust client for BOINC RPC protocol.
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! # tokio::runtime::Runtime::new().unwrap().block_on(async {
+//! let transport = boinc_rpc::Transport::new("127.0.0.1:31416", Some("my-pass-in-gui_rpc_auth.cfg"));
+//! let mut client = boinc_rpc::Client::new(transport);
+//!
+//! println!("{:?}\n", client.get_messages(0).await.unwrap());
+//! println!("{:?}\n", client.get_projects().await.unwrap());
+//! println!("{:?}\n", client.get_account_manager_info().await.unwrap());
+//! println!("{:?}\n", client.exchange_versions(&boinc_rpc::models::VersionInfo::default()).await.unwrap());
+//! println!("{:?}\n", client.get_results(false).await.unwrap());
+//! # })
+//! ```
+
+#![allow(clippy::type_complexity)]
+
 pub mod errors;
 pub mod models;
 pub mod rpc;
 pub mod util;
 
-use errors::*;
-use rpc::*;
+use crate::{errors::*, rpc::*};
+use std::{
+    fmt::Display,
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tokio::sync::Mutex;
+use tower::ServiceExt;
 
 pub fn verify_rpc_reply_contents(root_node: &treexml::Element) -> Result<bool, Error> {
     let mut success = false;
@@ -247,15 +274,93 @@ impl<'a> From<&'a treexml::Element> for models::HostInfo {
     }
 }
 
-pub struct Client {
-    conn: DaemonStream,
+type DaemonStreamFuture =
+    Pin<Box<dyn Future<Output = Result<DaemonStream, Error>> + Send + Sync + 'static>>;
+
+enum ConnState {
+    Connecting(DaemonStreamFuture),
+    Ready(DaemonStream),
+    Error(Error),
 }
 
-impl Client {
-    pub async fn connect(addr: String, password: Option<&str>) -> Result<Self, Error> {
-        Ok(Self {
-            conn: DaemonStream::connect(addr, password).await?,
+pub struct Transport {
+    state: Arc<Mutex<Option<ConnState>>>,
+}
+
+impl Transport {
+    pub fn new<A: Display, P: Display>(addr: A, password: Option<P>) -> Self {
+        let addr = addr.to_string();
+        let password = password.map(|p| p.to_string());
+        Self {
+            state: Arc::new(Mutex::new(Some(ConnState::Connecting(Box::pin(
+                DaemonStream::connect(addr, password),
+            ))))),
+        }
+    }
+}
+
+impl tower::Service<Vec<treexml::Element>> for Transport {
+    type Response = treexml::Element;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let mut g = match self.state.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Poll::Pending,
+        };
+
+        let (state, out) = match g.take().unwrap() {
+            ConnState::Connecting(mut future) => {
+                let res = future.as_mut().poll(cx);
+                match res {
+                    Poll::Pending => (Some(ConnState::Connecting(future)), Poll::Pending),
+                    Poll::Ready(Ok(conn)) => (Some(ConnState::Ready(conn)), Poll::Ready(Ok(()))),
+                    Poll::Ready(Err(e)) => (None, Poll::Ready(Err(e))),
+                }
+            }
+            ConnState::Ready(conn) => (Some(ConnState::Ready(conn)), Poll::Ready(Ok(()))),
+            ConnState::Error(error) => (
+                Some(ConnState::Error(error.clone())),
+                Poll::Ready(Err(error)),
+            ),
+        };
+
+        *g = state;
+        out
+    }
+
+    fn call(&mut self, req: Vec<treexml::Element>) -> Self::Future {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let mut state = state.lock().await;
+
+            let mut conn = match state.take() {
+                Some(ConnState::Ready(conn)) => conn,
+                _ => unreachable!(),
+            };
+
+            let res = conn.query(req).await;
+
+            if let Err(e) = &res {
+                *state = Some(ConnState::Error(e.clone()));
+            }
+
+            res
         })
+    }
+}
+
+pub struct Client<S> {
+    transport: S,
+}
+
+impl<S> Client<S>
+where
+    S: tower::Service<Vec<treexml::Element>, Response = treexml::Element, Error = Error>,
+{
+    pub fn new(transport: S) -> Self {
+        Self { transport }
     }
 
     async fn get_object<T: for<'a> From<&'a treexml::Element>>(
@@ -263,7 +368,8 @@ impl Client {
         req_data: Vec<treexml::Element>,
         object_tag: &str,
     ) -> Result<T, Error> {
-        let root_node = self.conn.query(req_data).await?;
+        self.transport.ready().await?;
+        let root_node = self.transport.call(req_data).await?;
         verify_rpc_reply_contents(&root_node)?;
         for child in &root_node.children {
             if child.name == object_tag {
@@ -290,7 +396,8 @@ impl Client {
     ) -> Result<Vec<T>, Error> {
         let mut v = Vec::new();
         {
-            let root_node = self.conn.query(req_data).await?;
+            self.transport.ready().await?;
+            let root_node = self.transport.call(req_data).await?;
             verify_rpc_reply_contents(&root_node)?;
             let mut success = false;
             for child in &root_node.children {
@@ -344,12 +451,14 @@ impl Client {
     }
 
     pub async fn get_account_manager_rpc_status(&mut self) -> Result<i32, Error> {
-        let mut v: Option<i32> = None;
+        self.transport.ready().await?;
         let root_node = self
-            .conn
-            .query(vec![treexml::Element::new("acct_mgr_rpc_poll")])
+            .transport
+            .call(vec![treexml::Element::new("acct_mgr_rpc_poll")])
             .await?;
         verify_rpc_reply_contents(&root_node)?;
+
+        let mut v: Option<i32> = None;
         for child in &root_node.children {
             if &*child.name == "acct_mgr_rpc_reply" {
                 for c in &child.children {
@@ -386,7 +495,8 @@ impl Client {
                 node
             },
         ];
-        let root_node = self.conn.query(vec![req_node]).await?;
+        self.transport.ready().await?;
+        let root_node = self.transport.call(vec![req_node]).await?;
         Ok(verify_rpc_reply_contents(&root_node)?)
     }
 
@@ -439,9 +549,10 @@ impl Client {
         m: models::RunMode,
         duration: f64,
     ) -> Result<(), Error> {
+        self.transport.ready().await?;
         let rsp_root = self
-            .conn
-            .query(vec![{
+            .transport
+            .call(vec![{
                 let comp_desc = match c {
                     models::Component::CPU => "run",
                     models::Component::GPU => "gpu",
@@ -474,10 +585,11 @@ impl Client {
     }
 
     pub async fn set_language(&mut self, v: &str) -> Result<(), Error> {
+        self.transport.ready().await?;
         verify_rpc_reply_contents(
             &self
-                .conn
-                .query(vec![{
+                .transport
+                .call(vec![{
                     let mut node = treexml::Element::new("set_language");
                     let mut language_node = treexml::Element::new("language");
                     language_node.text = Some(v.into());
