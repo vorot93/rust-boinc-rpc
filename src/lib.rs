@@ -30,12 +30,12 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::Mutex;
+use tokio::{net::TcpStream, sync::Mutex};
 use tower::ServiceExt;
 
-pub fn verify_rpc_reply_contents(root_node: &treexml::Element) -> Result<bool, Error> {
+pub fn verify_rpc_reply_contents(data: &[treexml::Element]) -> Result<bool, Error> {
     let mut success = false;
-    for node in &root_node.children {
+    for node in data {
         match &*node.name {
             "success" => success = true,
             "status" => {
@@ -275,11 +275,11 @@ impl<'a> From<&'a treexml::Element> for models::HostInfo {
 }
 
 type DaemonStreamFuture =
-    Pin<Box<dyn Future<Output = Result<DaemonStream, Error>> + Send + Sync + 'static>>;
+    Pin<Box<dyn Future<Output = Result<DaemonStream<TcpStream>, Error>> + Send + Sync + 'static>>;
 
 enum ConnState {
     Connecting(DaemonStreamFuture),
-    Ready(DaemonStream),
+    Ready(DaemonStream<TcpStream>),
     Error(Error),
 }
 
@@ -300,7 +300,7 @@ impl Transport {
 }
 
 impl tower::Service<Vec<treexml::Element>> for Transport {
-    type Response = treexml::Element;
+    type Response = Vec<treexml::Element>;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
@@ -357,7 +357,7 @@ pub struct Client<S> {
 
 impl<S> Client<S>
 where
-    S: tower::Service<Vec<treexml::Element>, Response = treexml::Element, Error = Error>,
+    S: tower::Service<Vec<treexml::Element>, Response = Vec<treexml::Element>, Error = Error>,
 {
     pub fn new(transport: S) -> Self {
         Self { transport }
@@ -369,9 +369,9 @@ where
         object_tag: &str,
     ) -> Result<T, Error> {
         self.transport.ready().await?;
-        let root_node = self.transport.call(req_data).await?;
-        verify_rpc_reply_contents(&root_node)?;
-        for child in &root_node.children {
+        let data = self.transport.call(req_data).await?;
+        verify_rpc_reply_contents(&data)?;
+        for child in &data {
             if child.name == object_tag {
                 return Ok(T::from(child));
             }
@@ -397,10 +397,10 @@ where
         let mut v = Vec::new();
         {
             self.transport.ready().await?;
-            let root_node = self.transport.call(req_data).await?;
-            verify_rpc_reply_contents(&root_node)?;
+            let data = self.transport.call(req_data).await?;
+            verify_rpc_reply_contents(&data)?;
             let mut success = false;
-            for child in &root_node.children {
+            for child in data {
                 if child.name == vec_tag {
                     success = true;
                     for vec_child in &child.children {
@@ -452,14 +452,14 @@ where
 
     pub async fn get_account_manager_rpc_status(&mut self) -> Result<i32, Error> {
         self.transport.ready().await?;
-        let root_node = self
+        let data = self
             .transport
             .call(vec![treexml::Element::new("acct_mgr_rpc_poll")])
             .await?;
-        verify_rpc_reply_contents(&root_node)?;
+        verify_rpc_reply_contents(&data)?;
 
         let mut v: Option<i32> = None;
-        for child in &root_node.children {
+        for child in &data {
             if &*child.name == "acct_mgr_rpc_reply" {
                 for c in &child.children {
                     if &*c.name == "error_num" {
@@ -608,10 +608,9 @@ mod tests {
 
     #[test]
     fn verify_rpc_reply_contents() {
-        let mut fixture = treexml::Element::new(String::new());
-        let mut v = treexml::Element::new("error");
-        v.text = Some("Missing authenticator".into());
-        fixture.children.push(v);
+        let mut fixture = treexml::Element::new("error");
+        fixture.text = Some("Missing authenticator".into());
+        let fixture = vec![fixture];
         assert_eq!(
             super::verify_rpc_reply_contents(&fixture).err().unwrap(),
             Error::AuthError("Missing authenticator".to_string())
