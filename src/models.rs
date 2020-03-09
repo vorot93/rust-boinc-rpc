@@ -157,7 +157,7 @@ pub struct ActiveTask {
 
 impl<'a> From<&'a treexml::Element> for ActiveTask {
     fn from(node: &treexml::Element) -> Self {
-        let mut e = ActiveTask::default();
+        let mut e = Self::default();
         for n in &node.children {
             match &*n.name {
                 "active_task_state" => {
@@ -167,46 +167,46 @@ impl<'a> From<&'a treexml::Element> for ActiveTask {
                     e.app_version_num = util::trimmed_optional(&n.text);
                 }
                 "slot" => {
-                    e.slot = util::eval_node_contents(&n);
+                    e.slot = util::eval_node_contents(n);
                 }
                 "pid" => {
-                    e.pid = util::eval_node_contents(&n);
+                    e.pid = util::eval_node_contents(n);
                 }
                 "scheduler_state" => {
                     e.scheduler_state = util::trimmed_optional(&n.text);
                 }
                 "checkpoint_cpu_time" => {
-                    e.checkpoint_cpu_time = util::eval_node_contents(&n);
+                    e.checkpoint_cpu_time = util::eval_node_contents(n);
                 }
                 "fraction_done" => {
-                    e.fraction_done = util::eval_node_contents(&n);
+                    e.fraction_done = util::eval_node_contents(n);
                 }
                 "current_cpu_time" => {
-                    e.current_cpu_time = util::eval_node_contents(&n);
+                    e.current_cpu_time = util::eval_node_contents(n);
                 }
                 "elapsed_time" => {
-                    e.elapsed_time = util::eval_node_contents(&n);
+                    e.elapsed_time = util::eval_node_contents(n);
                 }
                 "swap_size" => {
-                    e.swap_size = util::eval_node_contents(&n);
+                    e.swap_size = util::eval_node_contents(n);
                 }
                 "working_set_size" => {
-                    e.working_set_size = util::eval_node_contents(&n);
+                    e.working_set_size = util::eval_node_contents(n);
                 }
                 "working_set_size_smoothed" => {
-                    e.working_set_size_smoothed = util::eval_node_contents(&n);
+                    e.working_set_size_smoothed = util::eval_node_contents(n);
                 }
                 "page_fault_rate" => {
-                    e.page_fault_rate = util::eval_node_contents(&n);
+                    e.page_fault_rate = util::eval_node_contents(n);
                 }
                 "bytes_sent" => {
-                    e.bytes_sent = util::eval_node_contents(&n);
+                    e.bytes_sent = util::eval_node_contents(n);
                 }
                 "bytes_received" => {
-                    e.bytes_received = util::eval_node_contents(&n);
+                    e.bytes_received = util::eval_node_contents(n);
                 }
                 "progress_rate" => {
-                    e.progress_rate = util::eval_node_contents(&n);
+                    e.progress_rate = util::eval_node_contents(n);
                 }
                 _ => {}
             }

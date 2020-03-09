@@ -15,12 +15,13 @@
 //! # })
 //! ```
 
-#![allow(clippy::type_complexity)]
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
+#![allow(clippy::pub_enum_variant_names, clippy::type_complexity)]
 
-pub mod errors;
+mod errors;
 pub mod models;
 pub mod rpc;
-pub mod util;
+mod util;
 
 use crate::{errors::*, rpc::*};
 use std::{
@@ -33,14 +34,14 @@ use std::{
 use tokio::{net::TcpStream, sync::Mutex};
 use tower::ServiceExt;
 
-pub fn verify_rpc_reply_contents(data: &[treexml::Element]) -> Result<bool, Error> {
+fn verify_rpc_reply_contents(data: &[treexml::Element]) -> Result<bool, Error> {
     let mut success = false;
     for node in data {
         match &*node.name {
             "success" => success = true,
             "status" => {
                 return Err(Error::StatusError(
-                    util::eval_node_contents(&node).unwrap_or(9999),
+                    util::eval_node_contents(node).unwrap_or(9999),
                 ));
             }
             "unauthorized" => {
@@ -53,8 +54,7 @@ pub fn verify_rpc_reply_contents(data: &[treexml::Element]) -> Result<bool, Erro
                     .ok_or_else(|| Error::DaemonError("Unknown error".into()))?;
 
                 return match &*error_msg {
-                    "unauthorized" => Err(Error::AuthError(error_msg)),
-                    "Missing authenticator" => Err(Error::AuthError(error_msg)),
+                    "unauthorized" | "Missing authenticator" => Err(Error::AuthError(error_msg)),
                     "Missing URL" => Err(Error::InvalidURLError(error_msg)),
                     "Already attached to project" => Err(Error::AlreadyAttachedError(error_msg)),
                     _ => Err(Error::DataParseError(error_msg)),
@@ -67,8 +67,8 @@ pub fn verify_rpc_reply_contents(data: &[treexml::Element]) -> Result<bool, Erro
 }
 
 impl<'a> From<&'a treexml::Element> for models::Message {
-    fn from(node: &treexml::Element) -> models::Message {
-        let mut e = models::Message::default();
+    fn from(node: &treexml::Element) -> Self {
+        let mut e = Self::default();
         for n in &node.children {
             match &*n.name {
                 "body" => {
@@ -78,13 +78,13 @@ impl<'a> From<&'a treexml::Element> for models::Message {
                     e.project_name = util::trimmed_optional(&n.text);
                 }
                 "pri" => {
-                    e.priority = util::eval_node_contents(&n);
+                    e.priority = util::eval_node_contents(n);
                 }
                 "seqno" => {
-                    e.msg_number = util::eval_node_contents(&n);
+                    e.msg_number = util::eval_node_contents(n);
                 }
                 "time" => {
-                    e.timestamp = util::eval_node_contents(&n);
+                    e.timestamp = util::eval_node_contents(n);
                 }
                 _ => {}
             }
@@ -95,8 +95,8 @@ impl<'a> From<&'a treexml::Element> for models::Message {
 }
 
 impl<'a> From<&'a treexml::Element> for models::ProjectInfo {
-    fn from(node: &treexml::Element) -> models::ProjectInfo {
-        let mut e = models::ProjectInfo::default();
+    fn from(node: &treexml::Element) -> Self {
+        let mut e = Self::default();
         for n in &node.children {
             match &*n.name {
                 "name" => {
@@ -143,8 +143,8 @@ impl<'a> From<&'a treexml::Element> for models::ProjectInfo {
 }
 
 impl<'a> From<&'a treexml::Element> for models::AccountManagerInfo {
-    fn from(node: &treexml::Element) -> models::AccountManagerInfo {
-        let mut e = models::AccountManagerInfo::default();
+    fn from(node: &treexml::Element) -> Self {
+        let mut e = Self::default();
         for n in &node.children {
             match &*n.name {
                 "acct_mgr_url" => e.url = util::trimmed_optional(&util::any_text(n)),
@@ -166,13 +166,13 @@ impl<'a> From<&'a treexml::Element> for models::AccountManagerInfo {
 }
 
 impl<'a> From<&'a treexml::Element> for models::VersionInfo {
-    fn from(node: &treexml::Element) -> models::VersionInfo {
-        let mut e = models::VersionInfo::default();
+    fn from(node: &treexml::Element) -> Self {
+        let mut e = Self::default();
         for n in &node.children {
             match &*n.name {
-                "major" => e.major = util::eval_node_contents(&n),
-                "minor" => e.minor = util::eval_node_contents(&n),
-                "release" => e.release = util::eval_node_contents(&n),
+                "major" => e.major = util::eval_node_contents(n),
+                "minor" => e.minor = util::eval_node_contents(n),
+                "release" => e.release = util::eval_node_contents(n),
                 _ => {}
             }
         }
@@ -181,8 +181,8 @@ impl<'a> From<&'a treexml::Element> for models::VersionInfo {
 }
 
 impl<'a> From<&'a treexml::Element> for models::TaskResult {
-    fn from(node: &treexml::Element) -> models::TaskResult {
-        let mut e = models::TaskResult::default();
+    fn from(node: &treexml::Element) -> Self {
+        let mut e = Self::default();
         for n in &node.children {
             match &*n.name {
                 "name" => {
@@ -195,7 +195,7 @@ impl<'a> From<&'a treexml::Element> for models::TaskResult {
                     e.platform = util::trimmed_optional(&n.text);
                 }
                 "version_num" => {
-                    e.version_num = util::eval_node_contents(&n);
+                    e.version_num = util::eval_node_contents(n);
                 }
                 "plan_class" => {
                     e.plan_class = util::trimmed_optional(&n.text);
@@ -204,28 +204,28 @@ impl<'a> From<&'a treexml::Element> for models::TaskResult {
                     e.project_url = util::trimmed_optional(&n.text);
                 }
                 "final_cpu_time" => {
-                    e.final_cpu_time = util::eval_node_contents(&n);
+                    e.final_cpu_time = util::eval_node_contents(n);
                 }
                 "final_elapsed_time" => {
-                    e.final_elapsed_time = util::eval_node_contents(&n);
+                    e.final_elapsed_time = util::eval_node_contents(n);
                 }
                 "exit_status" => {
-                    e.exit_status = util::eval_node_contents(&n);
+                    e.exit_status = util::eval_node_contents(n);
                 }
                 "state" => {
-                    e.state = util::eval_node_contents(&n);
+                    e.state = util::eval_node_contents(n);
                 }
                 "report_deadline" => {
-                    e.report_deadline = util::eval_node_contents(&n);
+                    e.report_deadline = util::eval_node_contents(n);
                 }
                 "received_time" => {
-                    e.received_time = util::eval_node_contents(&n);
+                    e.received_time = util::eval_node_contents(n);
                 }
                 "estimated_cpu_time_remaining" => {
-                    e.estimated_cpu_time_remaining = util::eval_node_contents(&n);
+                    e.estimated_cpu_time_remaining = util::eval_node_contents(n);
                 }
                 "completed_time" => {
-                    e.completed_time = util::eval_node_contents(&n);
+                    e.completed_time = util::eval_node_contents(n);
                 }
                 "active_task" => {
                     e.active_task = Some(models::ActiveTask::from(n));
@@ -238,16 +238,16 @@ impl<'a> From<&'a treexml::Element> for models::TaskResult {
 }
 
 impl<'a> From<&'a treexml::Element> for models::HostInfo {
-    fn from(node: &treexml::Element) -> models::HostInfo {
-        let mut e = models::HostInfo::default();
+    fn from(node: &treexml::Element) -> Self {
+        let mut e = Self::default();
         for n in &node.children {
             match &*n.name {
-                "p_fpops" => e.p_fpops = util::eval_node_contents(&n),
-                "p_iops" => e.p_iops = util::eval_node_contents(&n),
-                "p_membw" => e.p_membw = util::eval_node_contents(&n),
-                "p_calculated" => e.p_calculated = util::eval_node_contents(&n),
+                "p_fpops" => e.p_fpops = util::eval_node_contents(n),
+                "p_iops" => e.p_iops = util::eval_node_contents(n),
+                "p_membw" => e.p_membw = util::eval_node_contents(n),
+                "p_calculated" => e.p_calculated = util::eval_node_contents(n),
                 "p_vm_extensions_disabled" => {
-                    e.p_vm_extensions_disabled = util::eval_node_contents(&n)
+                    e.p_vm_extensions_disabled = util::eval_node_contents(n)
                 }
                 "host_cpid" => e.host_cpid = n.text.clone(),
                 "product_name" => e.product_name = n.text.clone(),
@@ -260,13 +260,13 @@ impl<'a> From<&'a treexml::Element> for models::HostInfo {
                 "os_version" => e.os_version = n.text.clone(),
                 "virtualbox_version" => e.virtualbox_version = n.text.clone(),
                 "p_features" => e.p_features = n.text.clone(),
-                "timezone" => e.tz_shift = util::eval_node_contents(&n),
-                "p_ncpus" => e.p_ncpus = util::eval_node_contents(&n),
-                "m_nbytes" => e.m_nbytes = util::eval_node_contents(&n),
-                "m_cache" => e.m_cache = util::eval_node_contents(&n),
-                "m_swap" => e.m_swap = util::eval_node_contents(&n),
-                "d_total" => e.d_total = util::eval_node_contents(&n),
-                "d_free" => e.d_free = util::eval_node_contents(&n),
+                "timezone" => e.tz_shift = util::eval_node_contents(n),
+                "p_ncpus" => e.p_ncpus = util::eval_node_contents(n),
+                "m_nbytes" => e.m_nbytes = util::eval_node_contents(n),
+                "m_cache" => e.m_cache = util::eval_node_contents(n),
+                "m_swap" => e.m_swap = util::eval_node_contents(n),
+                "d_total" => e.d_total = util::eval_node_contents(n),
+                "d_free" => e.d_free = util::eval_node_contents(n),
                 _ => {}
             }
         }
@@ -340,13 +340,13 @@ impl tower::Service<Vec<treexml::Element>> for Transport {
                 _ => unreachable!(),
             };
 
-            let res = conn.query(req).await;
+            let query_res = conn.query(req).await;
 
-            if let Err(e) = &res {
+            if let Err(e) = &query_res {
                 *state = Some(ConnState::Error(e.clone()));
             }
 
-            res
+            query_res
         })
     }
 }
@@ -463,7 +463,7 @@ where
             if &*child.name == "acct_mgr_rpc_reply" {
                 for c in &child.children {
                     if &*c.name == "error_num" {
-                        v = util::eval_node_contents(&c);
+                        v = util::eval_node_contents(c);
                     }
                 }
             }

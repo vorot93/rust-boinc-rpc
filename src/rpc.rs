@@ -14,7 +14,7 @@ use tracing::*;
 
 use crate::{errors::Error, util};
 
-pub fn compute_nonce_hash(pass: &str, nonce: &str) -> String {
+fn compute_nonce_hash(pass: &str, nonce: &str) -> String {
     let mut digest = crypto::md5::Md5::new();
     digest.input_str(&format!("{}{}", nonce, pass));
     digest.result_str()
@@ -34,7 +34,8 @@ pub struct BoincCodec {
 }
 
 impl BoincCodec {
-    pub fn new(mode: CodecMode) -> Self {
+    #[must_use]
+    pub const fn new(mode: CodecMode) -> Self {
         Self {
             mode,
             next_index: 0,
@@ -196,20 +197,12 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> DaemonStream<Io> {
         &mut self,
         request_data: Vec<treexml::Element>,
     ) -> Result<Vec<treexml::Element>, Error> {
-        if request_data.is_empty() {
-            return Err(Error::NullError("Request data cannot be empty".into()));
-        }
-
         self.conn.send(request_data).await?;
         let data = self
             .conn
             .try_next()
             .await?
             .ok_or_else(|| Error::DaemonError("EOF".into()))?;
-
-        if data.is_empty() {
-            return Err(Error::DataParseError("Empty response root node".into()));
-        }
 
         Ok(data)
     }
